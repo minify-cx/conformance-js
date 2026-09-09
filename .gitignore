@@ -1,0 +1,9 @@
+.state/
+work/
+results/latest.json
+results/history/
+*.pyc
+__pycache__/
+generated/
+.nift/.lock
+.nift/public/
