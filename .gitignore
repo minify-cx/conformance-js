@@ -2,6 +2,8 @@
 work/
 results/latest.json
 results/history/
+results/shard-*.json
+results/shard-*.log
 *.pyc
 __pycache__/
 generated/

@@ -16,12 +16,19 @@ jobs:
         with: {repository: minify-cx/minify, path: minify-source}
       - run: make
         working-directory: minify-source
+      - run: python3 -m pip install PyYAML==6.0.3
       - run: make test && make sync
       - shell: bash
         run: |
           limit='${{ inputs.limit }}'
           if [[ -n "$limit" && "$limit" != 0 ]]; then python3 tools/conformance.py extract-js --limit "$limit"; else make extract; fi
-          python3 tools/conformance.py run-js --minify-bin "$GITHUB_WORKSPACE/minify-source/minify"
+          for shard in 0 1 2 3 4 5 6 7; do
+            python3 tools/conformance.py run-js \
+              --shard-count 8 --shard-index "$shard" \
+              --results "results/shard-$shard.json" \
+              --minify-bin "$GITHUB_WORKSPACE/minify-source/minify"
+          done
+          python3 tools/conformance.py combine results/shard-{0..7}.json
       - name: Build static dashboard
         shell: bash
         run: |
