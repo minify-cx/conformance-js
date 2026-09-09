@@ -8,6 +8,19 @@ def load(p): return json.loads(Path(p).read_text())
 def save(p,v): p=Path(p); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(json.dumps(v,indent=2,sort_keys=True)+'\n')
 def lock():
  p=ROOT/'.state/sources.lock.json'; return load(p) if p.exists() else {}
+def actual_revisions():
+ # Record the revision actually checked out for each configured source. The
+ # sync lock records what `sync` last checked out, which is stale when a
+ # corpus is pinned manually to reproduce a retained checkpoint; results must
+ # carry the revision the extraction truly used.
+ state={}; spec=load(ROOT/'config/sources.json')
+ for name,s in spec.items():
+  dst=ROOT/s['path']; old=lock().get(name,{})
+  if (dst/'.git').exists():
+   try: rev=subprocess.check_output(['git','rev-parse','HEAD'],cwd=dst,text=True).strip()
+   except Exception: rev=old.get('revision','')
+   state[name]={'url':s.get('url',old.get('url','')),'revision':rev,'synced_at':old.get('synced_at',now())}
+ return state
 def sync():
  spec=load(ROOT/'config/sources.json')['test262']; dst=ROOT/spec['path']; dst.parent.mkdir(parents=True,exist_ok=True)
  if dst.exists(): subprocess.run(['git','fetch','--prune','origin',spec['branch']],cwd=dst,check=True); subprocess.run(['git','checkout','--detach','FETCH_HEAD'],cwd=dst,check=True)
@@ -148,7 +161,7 @@ def execute(path,minifier,node,test262,result,timeout,shard_index=0,shard_count=
  for row in rows:
   if row['status']=='runtime-inapplicable':
    reason=row['evidence']['runtime_reason']; incompatibilities[reason]=incompatibilities.get(reason,0)+1
- payload={'schema_version':1,'format':'javascript','generated_at':now(),'duration_seconds':round(time.time()-started,3),'source_revisions':lock(),'runtime':subprocess.check_output([str(node),'--version'],text=True).strip(),'minifier':{'path':str(minifier)},'corpus_total':len(all_cases),'shard':{'index':shard_index,'count':shard_count},'total':len(rows),'counts':counts,'runtime_incompatibilities':incompatibilities,'results':rows}; save(result,payload); print(json.dumps({'counts':counts,'runtime_incompatibilities':incompatibilities},sort_keys=True))
+ payload={'schema_version':1,'format':'javascript','generated_at':now(),'duration_seconds':round(time.time()-started,3),'source_revisions':actual_revisions(),'runtime':subprocess.check_output([str(node),'--version'],text=True).strip(),'minifier':{'path':str(minifier)},'corpus_total':len(all_cases),'shard':{'index':shard_index,'count':shard_count},'total':len(rows),'counts':counts,'runtime_incompatibilities':incompatibilities,'results':rows}; save(result,payload); print(json.dumps({'counts':counts,'runtime_incompatibilities':incompatibilities},sort_keys=True))
  return 1 if any(counts.get(x) for x in ('minify-error','minified-timeout','semantic-failure')) else 0
 def combine(paths,result):
  parts=[load(p) for p in paths]
