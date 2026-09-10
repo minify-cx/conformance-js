@@ -62,9 +62,14 @@ async function execute(job) {
     }
     return { ok: true };
   } catch (error) {
+    const message = String(error && error.message || error);
+    // Match both "Script execution timed out after 5000ms" (vm.runInContext)
+    // and the async $DONE timeout message; the word "timeout" alone misses
+    // the vm phrasing.
+    const isTimeout = /timeout|timed\s*out/i.test(message);
     return {
       ok: false,
-      timeout: /timeout/i.test(String(error && error.message)),
+      timeout: isTimeout,
       error: String(error && error.stack || error)
     };
   } finally {

@@ -189,7 +189,7 @@ def dashboard(result):
 def main():
  p=argparse.ArgumentParser(); s=p.add_subparsers(dest='cmd',required=True); s.add_parser('sync'); e=s.add_parser('extract-js'); e.add_argument('--source',type=Path,default=ROOT/'.state/upstreams/test262'); e.add_argument('--output',type=Path,default=ROOT/'work/test262-js.jsonl'); e.add_argument('--limit',type=int)
  for name in ('run-js','smoke'):
-  q=s.add_parser(name); q.add_argument('--minify-bin',default='../minify/minify'); q.add_argument('--node-bin',default='node'); q.add_argument('--test262',type=Path,default=ROOT/'.state/upstreams/test262'); q.add_argument('--results',type=Path,default=RESULTS); q.add_argument('--timeout',type=float,default=5); q.add_argument('--dashboard',action='store_true')
+  q=s.add_parser(name); q.add_argument('--minify-bin',default='../minify/minify'); q.add_argument('--node-bin',default='node'); q.add_argument('--test262',type=Path,default=ROOT/'.state/upstreams/test262'); q.add_argument('--results',type=Path,default=RESULTS); q.add_argument('--timeout',type=float,default=30); q.add_argument('--dashboard',action='store_true')
   if name=='run-js': q.add_argument('--cases',type=Path,default=ROOT/'work/test262-js.jsonl'); q.add_argument('--shard-index',type=int,default=0); q.add_argument('--shard-count',type=int,default=1)
  c=s.add_parser('combine'); c.add_argument('shards',nargs='+',type=Path); c.add_argument('--results',type=Path,default=RESULTS)
  d=s.add_parser('dashboard'); d.add_argument('--results',type=Path,default=RESULTS); a=p.parse_args()

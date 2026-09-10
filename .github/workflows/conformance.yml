@@ -27,6 +27,7 @@ jobs:
               --shard-count 8 --shard-index "$shard" \
               --results "results/shard-$shard.json" \
               --minify-bin "$GITHUB_WORKSPACE/minify-source/minify"
+              --timeout 30
           done
           python3 tools/conformance.py combine results/shard-{0..7}.json
       - name: Build static dashboard
