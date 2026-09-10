@@ -186,6 +186,20 @@ def dashboard(result):
  rows=''.join(f"<tr><td>{html.escape(r['status'])}</td><td>{html.escape(r['source'])}</td><td><code>{r['id']}</code></td></tr>" for r in bad) or '<tr><td colspan="3">No non-pass cases.</td></tr>'
  g=ROOT/'generated/latest.html'; g.parent.mkdir(exist_ok=True); g.write_text(f'<section class="hero"><p class="eyebrow">JavaScript conformance</p><h1>Minify++ against selected Test262</h1><p>{data["total"]} independently sourced executable cases on {html.escape(data["runtime"])}. Generated {data["generated_at"]}.</p></section><ul class="stats">{cards}</ul><section><h2>Non-pass evidence</h2><table><thead><tr><th>Status</th><th>Source</th><th>ID</th></tr></thead><tbody>{rows}</tbody></table></section>')
  shutil.copy2(result,ROOT/'public/results/latest.json'); subprocess.run(['nift','build','--all'],cwd=ROOT,check=True)
+ verify_dashboard(result,ROOT/'public/index.html',ROOT/'public/results/latest.json')
+def verify_dashboard(result_path,index_path,published_path):
+ # Prove the freshly built dashboard reflects exactly this completed run: the
+ # published JSON must carry the same counts, source revisions, runtime,
+ # parser and generation timestamp, and the rendered page must contain no
+ # unresolved Nift directives.
+ data=load(result_path); pub=load(published_path)
+ for key in ('counts','source_revisions','runtime','parser','generated_at'):
+  if pub.get(key)!=data.get(key):
+   raise SystemExit(f"dashboard mismatch: {key} differs between result and published copy")
+ text=Path(index_path).read_text()
+ for token in ('@path(','@pathto(','@input(','@content'):
+  if token in text: raise SystemExit(f"unresolved Nift directive in dashboard: {token}")
+ print("dashboard verified: published JSON matches run and page has no unresolved directives")
 def main():
  p=argparse.ArgumentParser(); s=p.add_subparsers(dest='cmd',required=True); s.add_parser('sync'); e=s.add_parser('extract-js'); e.add_argument('--source',type=Path,default=ROOT/'.state/upstreams/test262'); e.add_argument('--output',type=Path,default=ROOT/'work/test262-js.jsonl'); e.add_argument('--limit',type=int)
  for name in ('run-js','smoke'):
@@ -198,7 +212,7 @@ def main():
  if a.cmd=='dashboard': dashboard(a.results); return 0
  if a.cmd=='combine': return combine(a.shards,a.results)
  if a.cmd=='smoke':
-  path=ROOT/'work/smoke-js.jsonl'; path.parent.mkdir(exist_ok=True); cases=[{'id':'basic','suite':'smoke','source':'basic','js':'assert.sameValue((()=>{ const x = 2; return x * 3; })(), 6);','flags':[],'includes':[]}]; path.write_text(''.join(json.dumps(x)+'\n' for x in cases)); a.test262=ROOT/'work/smoke-test262'; (a.test262/'harness').mkdir(parents=True,exist_ok=True); (a.test262/'harness/assert.js').write_text('var assert={sameValue:function(a,b){if(!Object.is(a,b))throw new Error("not same")}};'); (a.test262/'harness/sta.js').write_text('')
+  path=ROOT/'work/smoke-js.jsonl'; path.parent.mkdir(exist_ok=True); cases=[{'id':'basic','suite':'smoke','source':'basic','js':'assert.sameValue((()=>{ const x = 2; return x * 3; })(), 6);','flags':[],'features':[],'includes':[]}]; path.write_text(''.join(json.dumps(x)+'\n' for x in cases)); a.test262=ROOT/'work/smoke-test262'; (a.test262/'harness').mkdir(parents=True,exist_ok=True); (a.test262/'harness/assert.js').write_text('var assert={sameValue:function(a,b){if(!Object.is(a,b))throw new Error("not same")}};'); (a.test262/'harness/sta.js').write_text('')
  else: path=a.cases
  rc=execute(path,executable(a.minify_bin),executable(a.node_bin),a.test262,a.results,a.timeout,getattr(a,'shard_index',0),getattr(a,'shard_count',1))
  if a.dashboard: dashboard(a.results)
