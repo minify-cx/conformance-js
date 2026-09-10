@@ -178,7 +178,8 @@ def execute(path,minifier,node,test262,result,timeout,shard_index=0,shard_count=
  for row in rows:
   if row['status']=='runtime-inapplicable':
    reason=row['evidence']['runtime_reason']; incompatibilities[reason]=incompatibilities.get(reason,0)+1
- payload={'schema_version':1,'format':'javascript','generated_at':now(),'duration_seconds':round(time.time()-started,3),'source_revisions':actual_revisions(),'runtime':subprocess.check_output([str(node),'--version'],text=True).strip(),'minifier':minifier_identity(minifier),'oracle':oracle_identity(node),'corpus_total':len(all_cases),'shard':{'index':shard_index,'count':shard_count},'total':len(rows),'counts':counts,'runtime_incompatibilities':incompatibilities,'results':rows}; save(result,payload); print(json.dumps({'counts':counts,'runtime_incompatibilities':incompatibilities},sort_keys=True))
+ payload={'schema_version':1,'format':'javascript','generated_at':now(),'duration_seconds':round(time.time()-started,3),'source_revisions':actual_revisions(),'runtime':subprocess.check_output([str(node),'--version'],text=True).strip(),'minifier':minifier_identity(minifier),'oracle':oracle_identity(node),'corpus_total':len(all_cases),'shard':{'index':shard_index,'count':shard_count},'total':len(rows),'counts':counts,'runtime_incompatibilities':incompatibilities,'results':rows}; validate_identity(payload)
+ save(result,payload); print(json.dumps({'counts':counts,'runtime_incompatibilities':incompatibilities},sort_keys=True))
  return 1 if any(counts.get(x) for x in ('minify-error','minified-timeout','semantic-failure')) else 0
 def combine(paths,result):
  parts=[load(p) for p in paths]
@@ -195,10 +196,11 @@ def combine(paths,result):
    if row['status']=='runtime-inapplicable':
     reason=runtime_reason(row['evidence']['before'],row); row['evidence']['runtime_reason']=reason; incompat[reason]=incompat.get(reason,0)+1
  payload={k:parts[0][k] for k in ('schema_version','format','source_revisions','runtime','minifier','oracle')}; payload.update(generated_at=now(),duration_seconds=round(sum(p['duration_seconds'] for p in parts),3),total=len(rows),counts=counts,runtime_incompatibilities=incompat,results=rows)
+ validate_identity(payload)
  if len(rows)!=parts[0]['corpus_total']: raise SystemExit('combined result does not cover corpus')
  save(result,payload); save(ROOT/'results/history'/f'{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}.json',payload); print(json.dumps({'counts':counts,'runtime_incompatibilities':incompat},sort_keys=True))
  return 1 if any(counts.get(x) for x in ('minify-error','minified-timeout','semantic-failure')) else 0
-def dashboard(result):
+def dashboard(result, expected_commit=None):
  data=load(result); cards=''.join(f'<li><strong>{html.escape(k)}</strong><span>{v}</span></li>' for k,v in sorted(data['counts'].items())); bad=[r for r in data['results'] if r['status']!='pass'][:200]
  rows=''.join(f"<tr><td>{html.escape(r['status'])}</td><td>{html.escape(r['source'])}</td><td><code>{r['id']}</code></td></tr>" for r in bad) or '<tr><td colspan="3">No non-pass cases.</td></tr>'
  def provenance_text(data):
@@ -212,13 +214,31 @@ def dashboard(result):
 
  g=ROOT/'generated/latest.html'; g.parent.mkdir(exist_ok=True); g.write_text(f'<section class="hero"><p class="eyebrow">JavaScript conformance</p><h1>Minify++ against selected Test262</h1><p>{data["total"]} independently sourced executable cases on {html.escape(data["runtime"])}. Generated {data["generated_at"]}.</p></section><ul class="stats">{cards}</ul>{provenance_text}<section><h2>Non-pass evidence</h2><table><thead><tr><th>Status</th><th>Source</th><th>ID</th></tr></thead><tbody>{rows}</tbody></table></section>')
  shutil.copy(result,ROOT/'public/results/latest.json'); subprocess.run(['nift','build','--all'],cwd=ROOT,check=True)
- verify_dashboard(result,ROOT/'public/index.html',ROOT/'public/results/latest.json')
-def verify_dashboard(result_path,index_path,published_path):
+ verify_dashboard(result,ROOT/'public/index.html',ROOT/'public/results/latest.json',expected_commit)
+
+def validate_identity(payload, expected_commit=None):
+ m=payload.get('minifier'); o=payload.get('oracle')
+ if not isinstance(m,dict) or not m: raise SystemExit('identity validation failed: minifier identity missing or empty')
+ if m.get('name')=='Minify++':
+  if not re.match(r'^\d+\.\d+\.\d+$',str(m.get('version') or '')): raise SystemExit('identity validation failed: minifier semantic version missing/malformed')
+  if not m.get('version_string'): raise SystemExit('identity validation failed: minifier version_string empty')
+  c=str(m.get('commit') or '')
+  if not re.match(r'^[0-9a-f]{40}$',c): raise SystemExit('identity validation failed: minifier commit missing/malformed')
+  if expected_commit and c!=expected_commit: raise SystemExit('identity validation failed: minifier commit %s != expected %s'%(c,expected_commit))
+ else:
+  if not m.get('name') or not m.get('version'): raise SystemExit('identity validation failed: minifier name/version missing')
+ if not isinstance(o,dict) or not o: raise SystemExit('identity validation failed: oracle identity missing or empty')
+ for k in ("name","version"):
+  if not o.get(k): raise SystemExit('identity validation failed: oracle field %s empty'%k)
+
+def verify_dashboard(result_path,index_path,published_path,expected_commit=None):
  # Prove the freshly built dashboard reflects exactly this completed run: the
  # published JSON must carry the same counts, source revisions, runtime,
- # parser and generation timestamp, and the rendered page must contain no
- # unresolved Nift directives.
+ # parser, complete non-empty identity and generation timestamp, and the
+ # rendered page must contain no unresolved Nift directives.
  data=load(result_path); pub=load(published_path)
+ validate_identity(data,expected_commit)
+ validate_identity(pub,expected_commit)
  for key in ('counts','source_revisions','runtime','parser','minifier','oracle','generated_at'):
   if pub.get(key)!=data.get(key):
    raise SystemExit(f"dashboard mismatch: {key} differs between result and published copy")
@@ -232,10 +252,10 @@ def main():
   q=s.add_parser(name); q.add_argument('--minify-bin',default='../minify/minify'); q.add_argument('--node-bin',default='node'); q.add_argument('--test262',type=Path,default=ROOT/'.state/upstreams/test262'); q.add_argument('--results',type=Path,default=RESULTS); q.add_argument('--timeout',type=float,default=30); q.add_argument('--dashboard',action='store_true')
   if name=='run-js': q.add_argument('--cases',type=Path,default=ROOT/'work/test262-js.jsonl'); q.add_argument('--shard-index',type=int,default=0); q.add_argument('--shard-count',type=int,default=1)
  c=s.add_parser('combine'); c.add_argument('shards',nargs='+',type=Path); c.add_argument('--results',type=Path,default=RESULTS)
- d=s.add_parser('dashboard'); d.add_argument('--results',type=Path,default=RESULTS); a=p.parse_args()
+ d=s.add_parser('dashboard'); d.add_argument('--results',type=Path,default=RESULTS); d.add_argument('--require-minifier-commit'); a=p.parse_args()
  if a.cmd=='sync': sync(); return 0
  if a.cmd=='extract-js': extract(a.source,a.output,a.limit); return 0
- if a.cmd=='dashboard': dashboard(a.results); return 0
+ if a.cmd=='dashboard': dashboard(a.results, a.require_minifier_commit); return 0
  if a.cmd=='combine': return combine(a.shards,a.results)
  if a.cmd=='smoke':
   path=ROOT/'work/smoke-js.jsonl'; path.parent.mkdir(exist_ok=True); cases=[{'id':'basic','suite':'smoke','source':'basic','js':'assert.sameValue((()=>{ const x = 2; return x * 3; })(), 6);','flags':[],'features':[],'includes':[]}]; path.write_text(''.join(json.dumps(x)+'\n' for x in cases)); a.test262=ROOT/'work/smoke-test262'; (a.test262/'harness').mkdir(parents=True,exist_ok=True); (a.test262/'harness/assert.js').write_text('var assert={sameValue:function(a,b){if(!Object.is(a,b))throw new Error("not same")}};'); (a.test262/'harness/sta.js').write_text('')
