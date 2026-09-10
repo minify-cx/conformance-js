@@ -186,7 +186,7 @@ def combine(paths,result):
  count=parts[0]['shard']['count']; indices={p['shard']['index'] for p in parts}
  if len(parts)!=count or indices!=set(range(count)): raise SystemExit(f'incomplete shard set: have {sorted(indices)}, expected 0..{count-1}')
  for p in parts[1:]:
-  if p['source_revisions']!=parts[0]['source_revisions'] or p['runtime']!=parts[0]['runtime']: raise SystemExit('shard environment mismatch')
+  if p['source_revisions']!=parts[0]['source_revisions'] or p['runtime']!=parts[0]['runtime'] or p.get('minifier')!=parts[0].get('minifier') or p.get('oracle')!=parts[0].get('oracle'): raise SystemExit('shard environment mismatch')
  rows=[]; counts={}; incompat={}
  for p in parts:
   rows.extend(p['results'])
@@ -194,7 +194,7 @@ def combine(paths,result):
   for row in p['results']:
    if row['status']=='runtime-inapplicable':
     reason=runtime_reason(row['evidence']['before'],row); row['evidence']['runtime_reason']=reason; incompat[reason]=incompat.get(reason,0)+1
- payload={k:parts[0][k] for k in ('schema_version','format','source_revisions','runtime','minifier')}; payload.update(generated_at=now(),duration_seconds=round(sum(p['duration_seconds'] for p in parts),3),total=len(rows),counts=counts,runtime_incompatibilities=incompat,results=rows)
+ payload={k:parts[0][k] for k in ('schema_version','format','source_revisions','runtime','minifier','oracle')}; payload.update(generated_at=now(),duration_seconds=round(sum(p['duration_seconds'] for p in parts),3),total=len(rows),counts=counts,runtime_incompatibilities=incompat,results=rows)
  if len(rows)!=parts[0]['corpus_total']: raise SystemExit('combined result does not cover corpus')
  save(result,payload); save(ROOT/'results/history'/f'{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}.json',payload); print(json.dumps({'counts':counts,'runtime_incompatibilities':incompat},sort_keys=True))
  return 1 if any(counts.get(x) for x in ('minify-error','minified-timeout','semantic-failure')) else 0

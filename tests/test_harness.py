@@ -48,4 +48,27 @@ class IdentityTests(unittest.TestCase):
             self.assertEqual(ident["version"], "1.1.2")
             self.assertTrue(ident["commit"])
 
+
+
+    def test_combine_propagates_identity(self):
+        import json, tempfile
+        base = {
+            "schema_version": 1, "format": "javascript",
+            "source_revisions": {"test262": {"revision": "r"}}, "runtime": "v22.0.0",
+            "minifier": {"name": "Minify++", "version": "1.1.2", "commit": "x"*40},
+            "oracle": {"name": "nodejs", "version": "v22.0.0"},
+            "shard": {"index": 0, "count": 2}, "corpus_total": 0, "duration_seconds": 1.0,
+            "counts": {"pass": 2}, "runtime_incompatibilities": {},
+            "results": [],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            for i in (0, 1):
+                s = dict(base); s["shard"] = {"index": i, "count": 2}
+                (td/f"shard-{i}.json").write_text(json.dumps(s))
+            h.combine([td/"shard-0.json", td/"shard-1.json"], td/"combined.json")
+            out = json.loads((td/"combined.json").read_text())
+            self.assertEqual(out["minifier"], base["minifier"])
+            self.assertEqual(out["oracle"], base["oracle"])
+
 if __name__=='__main__': unittest.main()
