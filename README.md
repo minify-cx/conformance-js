@@ -34,3 +34,15 @@ and are not credited as Minify++ passes. Extraction separately records negative
 tests, modules, fixtures, host-only cases and 83 exact source-text-introspection
 tests. The complete run found seven genuine transformations across three
 lexical families; all were fixed and reduced into Minify++ product tests.
+
+## Partition variance
+
+The 48,011-case eligible population and the invariant that **zero**
+transformed failures exist (no `minify-error`, `minified-timeout` or
+`semantic-failure` in any run) are fixed. The exact `pass` vs
+`runtime-inapplicable` partition is not: a small number of async tests
+(Promise.any/allSettled, dynamic-import, top-level-await) land on either side
+of the timing boundary between runs, so a rerun can differ by a handful of
+cases (for example 39,747/8,264 versus the retained 39,741/8,270). The
+retained published checkpoint is a single immutable snapshot of one complete
+run; the partition boundary, not the language coverage, is what varies.
