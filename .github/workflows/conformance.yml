@@ -46,7 +46,7 @@ jobs:
             echo "FAIL: could not fetch https://nift.dev/install (HTTP $code)" >&2
             exit 1
           fi
-          NIFT_VERSION=4.0.12 NIFT_INSTALL_DIR="$RUNNER_TEMP/nift-bin" sh "$script"
+          NIFT_VERSION=4.0.10 NIFT_INSTALL_DIR="$RUNNER_TEMP/nift-bin" sh "$script"
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
