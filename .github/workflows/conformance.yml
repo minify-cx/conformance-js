@@ -32,9 +32,16 @@ jobs:
       - name: Build static dashboard
         shell: bash
         run: |
-          curl --retry 5 --retry-all-errors --retry-delay 5 -fsSL https://nift.dev/install | NIFT_VERSION=4.0.12 NIFT_INSTALL_DIR="$RUNNER_TEMP/nift-bin" sh
-          export PATH="$RUNNER_TEMP/nift-bin:$PATH"
-          python3 tools/conformance.py dashboard
+          script="$RUNNER_TEMP/nift-install.sh"
+          for attempt in $(seq 1 24); do
+            if curl -fsSL --connect-timeout 20 https://nift.dev/install -o "$script"; then
+              break
+            fi
+            echo "install fetch attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
+          test -s "$script" || { echo "FAIL: could not fetch https://nift.dev/install" >&2; exit 1; }
+          NIFT_VERSION=4.0.12 NIFT_INSTALL_DIR="$RUNNER_TEMP/nift-bin" sh "$script"
       - if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
