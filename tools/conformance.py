@@ -54,6 +54,23 @@ def extract(source,out,limit):
   ident=hashlib.sha256((rel+'\0'+text).encode()).hexdigest()[:16]; rows.append({'id':ident,'suite':'test262','source':rel,'js':text,'flags':meta.get('flags',[]),'features':meta.get('features',[]),'includes':meta.get('includes',[])})
   if limit and len(rows)>=limit: break
  out.parent.mkdir(parents=True,exist_ok=True); out.write_text(''.join(json.dumps(r,sort_keys=True)+'\n' for r in rows)); save(out.with_suffix('.summary.json'),{'eligible':len(rows),'skipped':skipped}); print(json.dumps({'eligible':len(rows),'skipped':skipped},sort_keys=True))
+
+def minifier_identity(exe):
+ probe=subprocess.run([str(exe),'--version'],capture_output=True,text=True)
+ text=(probe.stdout or probe.stderr or '').strip()
+ m=re.search(r'(\d+\.\d+\.\d+)',text)
+ commit=None
+ parent=Path(exe).resolve().parent
+ if (parent/'.git').exists():
+  r=subprocess.run(['git','-C',str(parent),'rev-parse','HEAD'],capture_output=True,text=True)
+  if r.returncode==0: commit=r.stdout.strip()
+ return {'name':'Minify++','version':m.group(1) if m else text,'version_string':text,'commit':commit,'path':str(exe)}
+
+
+def oracle_identity(node):
+ r=subprocess.run([str(node),'--version'],capture_output=True,text=True)
+ return {'name':'nodejs','version':(r.stdout or r.stderr or '').strip()}
+
 def executable(value):
  p=Path(value).expanduser()
  if p.exists(): return p.resolve()
@@ -161,7 +178,7 @@ def execute(path,minifier,node,test262,result,timeout,shard_index=0,shard_count=
  for row in rows:
   if row['status']=='runtime-inapplicable':
    reason=row['evidence']['runtime_reason']; incompatibilities[reason]=incompatibilities.get(reason,0)+1
- payload={'schema_version':1,'format':'javascript','generated_at':now(),'duration_seconds':round(time.time()-started,3),'source_revisions':actual_revisions(),'runtime':subprocess.check_output([str(node),'--version'],text=True).strip(),'minifier':{'path':str(minifier)},'corpus_total':len(all_cases),'shard':{'index':shard_index,'count':shard_count},'total':len(rows),'counts':counts,'runtime_incompatibilities':incompatibilities,'results':rows}; save(result,payload); print(json.dumps({'counts':counts,'runtime_incompatibilities':incompatibilities},sort_keys=True))
+ payload={'schema_version':1,'format':'javascript','generated_at':now(),'duration_seconds':round(time.time()-started,3),'source_revisions':actual_revisions(),'runtime':subprocess.check_output([str(node),'--version'],text=True).strip(),'minifier':minifier_identity(minifier),'oracle':oracle_identity(node),'corpus_total':len(all_cases),'shard':{'index':shard_index,'count':shard_count},'total':len(rows),'counts':counts,'runtime_incompatibilities':incompatibilities,'results':rows}; save(result,payload); print(json.dumps({'counts':counts,'runtime_incompatibilities':incompatibilities},sort_keys=True))
  return 1 if any(counts.get(x) for x in ('minify-error','minified-timeout','semantic-failure')) else 0
 def combine(paths,result):
  parts=[load(p) for p in paths]
@@ -184,7 +201,16 @@ def combine(paths,result):
 def dashboard(result):
  data=load(result); cards=''.join(f'<li><strong>{html.escape(k)}</strong><span>{v}</span></li>' for k,v in sorted(data['counts'].items())); bad=[r for r in data['results'] if r['status']!='pass'][:200]
  rows=''.join(f"<tr><td>{html.escape(r['status'])}</td><td>{html.escape(r['source'])}</td><td><code>{r['id']}</code></td></tr>" for r in bad) or '<tr><td colspan="3">No non-pass cases.</td></tr>'
- g=ROOT/'generated/latest.html'; g.parent.mkdir(exist_ok=True); g.write_text(f'<section class="hero"><p class="eyebrow">JavaScript conformance</p><h1>Minify++ against selected Test262</h1><p>{data["total"]} independently sourced executable cases on {html.escape(data["runtime"])}. Generated {data["generated_at"]}.</p></section><ul class="stats">{cards}</ul><section><h2>Non-pass evidence</h2><table><thead><tr><th>Status</th><th>Source</th><th>ID</th></tr></thead><tbody>{rows}</tbody></table></section>')
+ def provenance_text(data):
+  min=data.get('minifier',{}); ora=data.get('oracle',{}); revs=data.get('source_revisions',{})
+  bits=[f"<strong>Minify++</strong> {html.escape(str(min.get('version','')))}{(' ('+html.escape(str(min.get('commit',''))))[:9]+')' if min.get('commit') else ''}",
+        f"<strong>oracle</strong> {html.escape(str(ora.get('name','')))} {html.escape(str(ora.get('version','')))}"]
+  for k,v in revs.items():
+   bits.append(f"<strong>{html.escape(k)}</strong> <code>{html.escape(str(v.get('revision','')))[:12]}</code>")
+  return '<p class="provenance">' + ' &middot; '.join(bits) + '</p>'
+ provenance_text=provenance_text(data)
+
+ g=ROOT/'generated/latest.html'; g.parent.mkdir(exist_ok=True); g.write_text(f'<section class="hero"><p class="eyebrow">JavaScript conformance</p><h1>Minify++ against selected Test262</h1><p>{data["total"]} independently sourced executable cases on {html.escape(data["runtime"])}. Generated {data["generated_at"]}.</p></section><ul class="stats">{cards}</ul>{provenance_text}<section><h2>Non-pass evidence</h2><table><thead><tr><th>Status</th><th>Source</th><th>ID</th></tr></thead><tbody>{rows}</tbody></table></section>')
  shutil.copy(result,ROOT/'public/results/latest.json'); subprocess.run(['nift','build','--all'],cwd=ROOT,check=True)
  verify_dashboard(result,ROOT/'public/index.html',ROOT/'public/results/latest.json')
 def verify_dashboard(result_path,index_path,published_path):
@@ -193,7 +219,7 @@ def verify_dashboard(result_path,index_path,published_path):
  # parser and generation timestamp, and the rendered page must contain no
  # unresolved Nift directives.
  data=load(result_path); pub=load(published_path)
- for key in ('counts','source_revisions','runtime','parser','generated_at'):
+ for key in ('counts','source_revisions','runtime','parser','minifier','oracle','generated_at'):
   if pub.get(key)!=data.get(key):
    raise SystemExit(f"dashboard mismatch: {key} differs between result and published copy")
  text=Path(index_path).read_text()
