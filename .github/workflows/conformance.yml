@@ -1,0 +1,44 @@
+name: JavaScript Conformance
+on:
+  workflow_dispatch:
+    inputs:
+      limit: {description: "Maximum eligible cases (0 = all)", required: true, default: "0"}
+  schedule: [{cron: "41 3 * * 1"}]
+permissions: {contents: read}
+jobs:
+  test262:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with: {ref: stage}
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with: {repository: minify-cx/minify, path: minify-source}
+      - run: make
+        working-directory: minify-source
+      - run: python3 -m pip install PyYAML==6.0.3
+      - run: make test && make sync
+      - shell: bash
+        run: |
+          limit='${{ inputs.limit }}'
+          if [[ -n "$limit" && "$limit" != 0 ]]; then python3 tools/conformance.py extract-js --limit "$limit"; else make extract; fi
+          for shard in 0 1 2 3 4 5 6 7; do
+            python3 tools/conformance.py run-js \
+              --shard-count 8 --shard-index "$shard" \
+              --results "results/shard-$shard.json" \
+              --minify-bin "$GITHUB_WORKSPACE/minify-source/minify"
+          done
+          python3 tools/conformance.py combine results/shard-{0..7}.json
+      - name: Build static dashboard
+        shell: bash
+        run: |
+          curl -fsSL https://nift.dev/install | NIFT_VERSION=4.0.12 NIFT_INSTALL_DIR="$RUNNER_TEMP/nift-bin" sh
+          export PATH="$RUNNER_TEMP/nift-bin:$PATH"
+          python3 tools/conformance.py dashboard
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: javascript-conformance-results
+          path: |
+            results/
+            public/
